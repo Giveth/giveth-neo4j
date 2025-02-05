@@ -1,0 +1,56 @@
+# 🚀 Python Virtual Environment & Binaries
+env/
+venv/
+bin/ 
+lib/
+include/
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+pyvenv.cfg
+
+# 🚀 OS/System Files
+.DS_Store
+Thumbs.db
+
+# 🚀 Environment Variables (Secrets)
+.env
+*.env
+
+# 🚀 Python Dependency Files
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 🚀 Jupyter Notebook Checkpoints (If Using)
+.ipynb_checkpoints/
+
+# 🚀 Logs & Cache
+logs/
+*.log
+*.sqlite
+*.db
+*.pid
+
+# 🚀 Compiled/Cached Files
+*.egg-info/
+*.pytest_cache/
+*.coverage
+
+# 🚀 Neo4j & PostgreSQL
+data/
+dump.rdb
+postgres_data/
+neo4j_data/
+
+# 🚀 Embeddings (If storing locally)
+data/embeddings.json
+
+# 🚀 Ignore VSCode/JetBrains IDE Files (Optional)
+.vscode/
+.idea/
+*.iml
+
+# 🚀 Ignore PyCharm Virtual Environment (Optional)
+.idea/
+*.iml
