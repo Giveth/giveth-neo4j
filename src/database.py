@@ -4,6 +4,12 @@ from config import DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT
 
 CACHE_FILE = "data/projects_cache.json"
 
+def get_sqlite_connection():
+    """
+    Create a connection to the SQLite database.
+    """
+    return sqlite3.connect(DB_PATH)
+
 def get_giveth_projects():
     """Fetch projects from PostgreSQL and cache the result."""
     if os.path.exists(CACHE_FILE):
@@ -60,7 +66,7 @@ DB_PATH = "data/local_data.db"
 
 def create_tables():
     """Create tables for storing project chunks and embeddings."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlite_connection()
     cursor = conn.cursor()
 
     # Chunks Table: Stores tokenized descriptions
@@ -91,7 +97,7 @@ def create_tables():
 
 # insert_chunk function
 def insert_chunk(uuid, text, project_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlite_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("INSERT INTO chunks (id, text, project_id) VALUES (?, ?, ?)", 
@@ -120,7 +126,7 @@ def get_chunk(uuid):
 
 # add_chunk_embedding function
 def set_chunk_embedding(uuid, embedding):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlite_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE chunks SET embedding = ? WHERE id = ?", 
                    (json.dumps(embedding), uuid))
@@ -146,15 +152,72 @@ def test_add_chunk_twice():
 
 # insert project
 def insert_project(id, title, raised_amount, giv_power, listed):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlite_connection()
     cursor = conn.cursor()
     cursor.execute("INSERT INTO projects (id, title, raised_amount, giv_power, listed) VALUES (?, ?, ?, ?, ?)", 
                    (id, title, raised_amount, giv_power, listed))
     conn.commit()
     conn.close()
 
-# Run the test
+def get_all_projects():
+    """
+    Fetch all projects from SQLite.
+    """
+    conn = get_sqlite_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, raised_amount, giv_power, listed, updated_at FROM projects")
+    projects = cursor.fetchall()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "title": row[1],
+            "raised_amount": row[2],
+            "giv_power": row[3],
+            "listed": bool(row[4]),
+            "updated_at": row[5]
+        }
+        for row in projects
+    ]
+
+import numpy as np
+import ast  # Used to safely convert string representation of a list to an actual list
+
+def get_all_chunks():
+    """
+    Fetch all chunks from SQLite and correctly convert the embedding stored as a string into a float list.
+    """
+    conn = get_sqlite_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, project_id, text, created_at, embedding FROM chunks WHERE embedding IS NOT NULL")
+    chunks = cursor.fetchall()
+    conn.close()
+
+    formatted_chunks = []
+    for row in chunks:
+        embedding_blob = row[4]  # The stored embedding
+
+        if embedding_blob is None:
+            continue
+
+        # Convert string representation of a list to an actual list
+        if isinstance(embedding_blob, str):
+            embedding_array = ast.literal_eval(embedding_blob)  # Safely parse the string to a Python list
+        else:
+            embedding_array = np.frombuffer(embedding_blob, dtype=np.float32).tolist()
+
+        formatted_chunks.append({
+            "id": row[0],
+            "project_id": row[1],
+            "text": row[2],
+            "created_at": row[3],
+            "embedding": embedding_array
+        })
+
+    return formatted_chunks
+
 if __name__ == "__main__":
     create_tables()
-    test_add_chunk_twice()
+    # test_add_chunk_twice()
     print("✅ Test passed!")
