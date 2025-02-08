@@ -36,13 +36,12 @@ def get_giveth_projects():
                 ORDER BY
                     "totalPower" DESC
                 LIMIT
-                    10;"""
+                    1000;"""
           # Adjust as needed
         cursor.execute(query)
         projects = cursor.fetchall()
 
         conn.close()
-        print(projects[0][6])
         get_giveth_projects.cache = [{
             "id": p[0],
             "title": p[1],
@@ -154,8 +153,15 @@ def test_add_chunk_twice():
 def insert_project(id, title, raised_amount, giv_power, listed):
     conn = get_sqlite_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO projects (id, title, raised_amount, giv_power, listed) VALUES (?, ?, ?, ?, ?)", 
-                   (id, title, raised_amount, giv_power, listed))
+    cursor.execute("""
+        INSERT INTO projects (id, title, raised_amount, giv_power, listed) 
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            title=excluded.title,
+            raised_amount=excluded.raised_amount,
+            giv_power=excluded.giv_power,
+            listed=excluded.listed
+    """, (id, title, raised_amount, giv_power, listed))
     conn.commit()
     conn.close()
 

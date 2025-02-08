@@ -12,16 +12,16 @@ openai.api_key = OPENAI_API_KEY
 if __name__ == "__main__":
     projects =  get_giveth_projects()
 
-    project = projects[0]
-    insert_project(project["id"], project["title"], project["raised_amount"], project["giv_power"], project["listed"])
+    for project in projects:
+        insert_project(project["id"], project["title"], project["raised_amount"], project["giv_power"], project["listed"])
 
-    chunks = chunk_text(project["description"])
-    for chunk in chunks:
-        print(chunk)
-        uuid = generate_chunk_uuid(chunk)
-        insert_chunk(uuid, chunk, project["id"])
-        embed_chunk(uuid)
-        print(uuid)
-        print("-" * 40)
+        chunks = chunk_text(project["description"])
+        for chunk in chunks:
+            print(chunk)
+            uuid = generate_chunk_uuid(chunk)
+            insert_chunk(uuid, chunk, project["id"])
+            embed_chunk(uuid)
+            print(uuid)
+            print("-" * 40)
 
 
