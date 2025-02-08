@@ -1,17 +1,5 @@
-from config import OPENAI_API_KEY
 from database import get_chunk, set_chunk_embedding
-from openai import OpenAI
-
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-
-def generate_embedding(text):
-    """Generate embeddings using OpenAI's API."""
-    response = client.embeddings.create(
-        model="text-embedding-ada-002",
-        input=text
-    )
-    return response.data[0].embedding
+from utils.openai import generate_embedding
 
 def embed_chunk(uuid):
     # check embedding exists on db

@@ -1,5 +1,5 @@
 import sqlite3
-from db import get_projects
+from database import get_projects
 from chunking import chunk_text
 from database import DB_PATH
 

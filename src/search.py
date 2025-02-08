@@ -1,5 +1,5 @@
 from neo4j_utils import get_neo4j_driver
-from embedding import generate_embedding
+from utils.openai import generate_embedding
 
 
 # def search_similar_projects(query_text, top_n=5):
@@ -30,13 +30,12 @@ def search_projects_with_chunks(query_text, similarity_threshold=0.7):
 
     # Define the Cypher query
     query = """
-    WITH $queryVector AS queryVector
     MATCH (p:Project)-[:HAS_CHUNK]->(c:Chunk)
     WHERE p.listed = true
     WITH 
         p, 
         c,
-        gds.similarity.cosine(c.embedding, queryVector) AS similarity
+        gds.similarity.cosine(c.embedding, $queryVector) AS similarity
     WHERE similarity > $similarityThreshold
     WITH 
         p.id AS project_id,
@@ -52,7 +51,7 @@ def search_projects_with_chunks(query_text, similarity_threshold=0.7):
         giv_power,
         average_similarity,  // Return average similarity
         related_chunks
-    ORDER BY average_similarity DESC  // Order by most relevant projects
+    ORDER BY average_similarity DESC LIMIT 5 // Order by most relevant projects
     """
 
     # Execute the query
