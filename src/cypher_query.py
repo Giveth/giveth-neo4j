@@ -61,7 +61,7 @@ def generate_neo4j_query(request, schema_hint, embedding_message=None, embedding
         prompt += f"""
         I have embedding of {embedding_message}.
         If you want to use it, I will pass it as a parmeter named queryVector.
-        Please for similarity use gds.similarity.cosine(c.embedding, $queryVector) as similarity if you need.
+        Please for similarity use gds.similarity.cosine(c.embedding, $queryVector) as similarity with threshohd more than 0.8  if you need.
         """
 
     prompt += """
