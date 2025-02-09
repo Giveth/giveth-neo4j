@@ -66,7 +66,6 @@ def generate_neo4j_query(request, schema_hint, embedding_message=None, embedding
 
     prompt += """
     Generate a Cypher query that can be executed on Neo4j to fulfill the request.
-    Use gds page rank if it helps.
 
     Return only the Cypher query, no additional commentary.
     """
