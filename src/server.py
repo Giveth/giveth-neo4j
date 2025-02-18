@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import sqlite3
-import sys
 import os
+import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +19,16 @@ def check_api_key(api_key):
     conn.close()
     return result is not None
 
+def log_api_key_usage(api_key, endpoint, request_body):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO api_key_usage (api_key, endpoint, timestamp, request_body)
+        VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+    ''', (api_key, endpoint, request_body))
+    conn.commit()
+    conn.close()
+
 @app.route('/', methods=['GET'])
 def health_check():
     return "App is healthy ;)"
@@ -32,6 +42,8 @@ def query():
     data = request.get_json()
     if not data or 'query' not in data or 'output_format' not in data:
         return jsonify({'error': 'Invalid request body'}), 400
+
+    log_api_key_usage(api_key, '/query', str(data))
 
     user_request = {
         'query': data['query'],
