@@ -1,11 +1,15 @@
+from flask import Flask, request, jsonify
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from flask import Flask, request, jsonify
 from src.cypher_query import process_user_request, schema_hint
 
 app = Flask(__name__)
+
+@app.route('/', methods=['GET'])
+def health_check():
+    return "App is healthy ;)"
 
 @app.route('/query', methods=['POST'])
 def query():
