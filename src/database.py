@@ -7,8 +7,9 @@ from decimal import Decimal
 from html_cleaner import clean_html
 import psycopg2
 from config import DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT
+from helper.project_data_parser import extract_flat_project_data
 
-CACHE_FILE = "data/projects_cache.json"
+CACHE_FILE = "data/projects_cache2.json"
 
 
 def get_sqlite_connection():
@@ -25,40 +26,72 @@ def get_giveth_projects():
             get_giveth_projects.cache = json.load(f)
     else:
         conn = psycopg2.connect(
-            host=DB_HOST, database=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
+            host=DB_HOST,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            port=DB_PORT,
         )
         cursor = conn.cursor()
 
         query = """SELECT
-                    ID,
-                    TITLE,
-                    DESCRIPTION,
-                    "totalDonations",
-                    "updatedAt",
-                    LISTED,
-                    "totalPower"
-                FROM
-                    PROJECT inner join public.project_instant_power_view  on project.id = project_instant_power_view."projectId"
-                WHERE
-                    LISTED = TRUE
-                ORDER BY
-                    "totalPower" DESC
-                LIMIT
-                    1000;"""
+                    p.ID,
+                    p.TITLE,
+                    p.DESCRIPTION,
+                    p."totalDonations",
+                    p."giveBacks",
+                    p.LISTED,
+                    p."countUniqueDonors",
+                    p."updatedAt",
+                    u."walletAddress",
+                    qfr."isActive",
+
+                    COALESCE(
+                        JSONB_OBJECT_AGG(
+                            pa."chainType",
+                            pa.networks
+                        ) FILTER (WHERE pa."chainType" IS NOT NULL), '{}'::JSONB
+                    ) AS addresses,
+
+                    COALESCE(
+                        JSONB_OBJECT_AGG(
+                            psm."type",
+                            psm."link"
+                        ) FILTER (WHERE psm."link" IS NOT NULL), '{}'::JSONB
+                    ) AS social_media
+
+                    -- pipv."totalPower"
+
+                FROM public.project p
+                LEFT JOIN project_qf_rounds_qf_round pqrq ON p.id = pqrq."projectId"
+                LEFT JOIN qf_round qfr ON qfr.id = pqrq."qfRoundId"
+                INNER JOIN public.user u ON p."adminUserId" = u.id
+                -- INNER JOIN public.project_instant_power_view pipv  ON p.id = pipv."projectId"
+
+                LEFT JOIN (
+                    SELECT 
+                        pa."projectId",
+                        pa."chainType",
+                        JSONB_OBJECT_AGG(pa."networkId", pa."address") AS networks
+                    FROM public.project_address pa
+                    GROUP BY pa."projectId", pa."chainType"
+                ) pa ON p.id = pa."projectId"
+
+                LEFT JOIN public.project_social_media psm ON p.id = psm."projectId"
+
+                WHERE p.LISTED = TRUE
+
+                GROUP BY 
+                    p.ID, p.TITLE, p.DESCRIPTION, p."totalDonations", p."giveBacks", 
+                    p."updatedAt", p.LISTED, qfr."isActive", u."walletAddress"
+
+                LIMIT 1000;"""
         # Adjust as needed
         cursor.execute(query)
         projects = cursor.fetchall()
 
         conn.close()
-        get_giveth_projects.cache = [{
-            "id": p[0],
-            "title": p[1],
-            "description": clean_html(p[2]),
-            "raised_amount": p[3],
-            "updated_at": p[4].isoformat() if p[4] else None,
-            "listed": bool(p[5]),
-            "giv_power": float(p[6]),
-        } for p in projects]
+        get_giveth_projects.cache = [extract_flat_project_data(p) for p in projects]
 
         with open(CACHE_FILE, "w") as f:
             json.dump(get_giveth_projects.cache, f)
@@ -68,14 +101,14 @@ def get_giveth_projects():
 
 DB_PATH = "data/local_data.db"
 
-
 def create_tables():
     """Create tables for storing project chunks and embeddings."""
     conn = get_sqlite_connection()
     cursor = conn.cursor()
 
     # Chunks Table: Stores tokenized descriptions
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS chunks (
             id TEXT PRIMARY KEY,  -- UUID of the chunk
             project_id INTEGER,
@@ -83,10 +116,12 @@ def create_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             embedding BLOB
         )
-    """)
+    """
+    )
 
     # Project Table: Stores project id, title, raised_amount, giv_power
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY,
             title TEXT,
@@ -96,10 +131,12 @@ def create_tables():
             listed BOOLEAN,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+    """
+    )
 
     conn.commit()
     conn.close()
+
 
 # insert_chunk function
 
@@ -108,8 +145,10 @@ def insert_chunk(uuid, text, project_id):
     conn = get_sqlite_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO chunks (id, text, project_id) VALUES (?, ?, ?)",
-                       (uuid, text, project_id))
+        cursor.execute(
+            "INSERT INTO chunks (id, text, project_id) VALUES (?, ?, ?)",
+            (uuid, text, project_id),
+        )
         conn.commit()
     except sqlite3.IntegrityError:
         # Ignore if the chunk with the same UUID already exists
@@ -117,23 +156,24 @@ def insert_chunk(uuid, text, project_id):
     finally:
         conn.close()
 
+
 # get_chunk function by id
 
 
 def get_chunk(uuid):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, text, embedding FROM chunks WHERE id = ?", (uuid,))
+    cursor.execute("SELECT id, text, embedding FROM chunks WHERE id = ?", (uuid,))
     row = cursor.fetchone()
     conn.close()
     if row:
         return {
             "id": row[0],
             "text": row[1],
-            "embedding": json.loads(row[2]) if row[2] else None
+            "embedding": json.loads(row[2]) if row[2] else None,
         }
     return None
+
 
 # add_chunk_embedding function
 
@@ -141,8 +181,9 @@ def get_chunk(uuid):
 def set_chunk_embedding(uuid, embedding):
     conn = get_sqlite_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE chunks SET embedding = ? WHERE id = ?",
-                   (json.dumps(embedding), uuid))
+    cursor.execute(
+        "UPDATE chunks SET embedding = ? WHERE id = ?", (json.dumps(embedding), uuid)
+    )
     conn.commit()
     conn.close()
 
@@ -164,13 +205,15 @@ def test_add_chunk_twice():
     conn.close()
     assert count == 1, "Chunk was added twice!"
 
+
 # insert project
 
 
 def insert_project(id, title, description, raised_amount, giv_power, listed):
     conn = get_sqlite_connection()
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO projects (id, title, description, raised_amount, giv_power, listed) 
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
@@ -179,7 +222,9 @@ def insert_project(id, title, description, raised_amount, giv_power, listed):
             giv_power=excluded.giv_power,
             listed=excluded.listed,
             description=excluded.description
-    """, (id, title, description, raised_amount, giv_power, listed))
+    """,
+        (id, title, description, raised_amount, giv_power, listed),
+    )
     conn.commit()
     conn.close()
 
@@ -191,7 +236,8 @@ def get_all_projects():
     conn = get_sqlite_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, title, raised_amount, giv_power, listed, updated_at, description FROM projects")
+        "SELECT id, title, raised_amount, giv_power, listed, updated_at, description FROM projects"
+    )
     projects = cursor.fetchall()
     conn.close()
 
@@ -203,7 +249,7 @@ def get_all_projects():
             "giv_power": row[3],
             "listed": bool(row[4]),
             "updated_at": row[5],
-            "description": row[6]
+            "description": row[6],
         }
         for row in projects
     ]
@@ -216,7 +262,8 @@ def get_all_chunks():
     conn = get_sqlite_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, project_id, text, created_at, embedding FROM chunks WHERE embedding IS NOT NULL")
+        "SELECT id, project_id, text, created_at, embedding FROM chunks WHERE embedding IS NOT NULL"
+    )
     chunks = cursor.fetchall()
     conn.close()
 
@@ -232,16 +279,17 @@ def get_all_chunks():
             # Safely parse the string to a Python list
             embedding_array = ast.literal_eval(embedding_blob)
         else:
-            embedding_array = np.frombuffer(
-                embedding_blob, dtype=np.float32).tolist()
+            embedding_array = np.frombuffer(embedding_blob, dtype=np.float32).tolist()
 
-        formatted_chunks.append({
-            "id": row[0],
-            "project_id": row[1],
-            "text": row[2],
-            "created_at": row[3],
-            "embedding": embedding_array
-        })
+        formatted_chunks.append(
+            {
+                "id": row[0],
+                "project_id": row[1],
+                "text": row[2],
+                "created_at": row[3],
+                "embedding": embedding_array,
+            }
+        )
 
     return formatted_chunks
 

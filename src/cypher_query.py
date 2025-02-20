@@ -140,10 +140,10 @@ user_request = {
     'query': "I want to hear about projects impact kids health",
     'output_format': "{project_id, project_title, raised_amount, giv_power, related_chunks: [text]}"
 }
-# results = process_user_request(schema_hint=schema_hint, request=user_request)
+results = process_user_request(schema_hint=schema_hint, request=user_request)
 print('#######################')
 
-# print(json.dumps(results, indent=4))
+print(json.dumps(results, indent=4))
 
 # from langchain_neo4j import GraphCypherQAChain, Neo4jGraph
 # from langchain_openai import ChatOpenAI
