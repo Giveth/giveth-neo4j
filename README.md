@@ -2,12 +2,12 @@
 
 This project provides a Flask web server that interacts with a Neo4j database. It includes functionality for managing API keys, logging API key usage, and processing user requests to generate and execute Cypher queries.
 
-## Requirements
+## 1. Requirements
 
 - Python 3.13+
 - pip
 
-## Installation
+## 2. Installation
 
 1. Install the required packages:
 
@@ -21,7 +21,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
    
-## Running the Main App
+## 3. Running the Main App
 
 The main application logic is in `src/cypher_query.py`. To run it, you can use the following command:
 
@@ -29,7 +29,7 @@ The main application logic is in `src/cypher_query.py`. To run it, you can use t
 python src/cypher_query.py
 ```
 
-## Running the Web Server
+## 4. Running the Web Server
 
 To start the Flask web server, run:
 
@@ -39,7 +39,7 @@ python src/server.py
 
 The server will be available at `http://127.0.0.1:5000/`.
 
-## Adding an API Key
+## 5. Adding an API Key
 
 To add a desired API key, modify the `src/add_api_key.py` file. Replace the placeholder values with your desired user and API key:
 
@@ -55,7 +55,7 @@ python src/add_api_key.py
 ```
 It will add your API key to the local sqlite DB
 
-## Endpoints
+## 6. Endpoints to use cypher query
 
 ### Health Check:
 - **GET** `/`
@@ -73,3 +73,15 @@ It will add your API key to the local sqlite DB
   }
   ```
 - Returns the results of the processed query.
+
+This is the sample curl to use cypher query for your app (replace `your_unique_api_key` with the API key you added in step 5):
+
+```curl
+curl --location '127.0.0.1:5000/query' \
+--header 'X-API-KEY: your_unique_api_key' \
+--header 'Content-Type: application/json' \
+--data '{
+    "query":"I want to hear about projects impact kids health",
+    "output_format": "{project_id, project_title, raised_amount, giv_power, related_chunks: [text]}"
+}'
+```
