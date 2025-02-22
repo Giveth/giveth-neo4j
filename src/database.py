@@ -86,6 +86,9 @@ def get_giveth_projects():
                     p.ID, p.TITLE, p.DESCRIPTION, p."totalDonations", p."giveBacks", 
                     p."updatedAt", p.LISTED, qfr."isActive", u."walletAddress", pipv."totalPower", pipv."powerRank"
 
+                ORDER BY
+	                pipv."totalPower" DESC
+
                 LIMIT 1000;"""
 
         # Adjust as needed
@@ -362,7 +365,7 @@ def get_all_projects():
     conn = get_sqlite_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, title, raised_amount, giv_power, giv_power_rank, listed, updated_at, givbacks_eligible, description, in_active_qf_round, unique_donors, owner_wallet, polygon_address, celo_address, base_address, solana_address, ethereum_address, arbitrum_address, optimism_address, gnosis_address, stellar_address, zkevm_address, ethereum_classic_address, x, discord, telegram, instagram, facebook, github, linkedin, website, farcaster, youtube, reddit, lens, FROM projects"
+        "SELECT id, title, raised_amount, giv_power, giv_power_rank, listed, updated_at, givbacks_eligible, description, in_active_qf_round, unique_donors, owner_wallet, polygon_address, celo_address, base_address, solana_address, ethereum_address, arbitrum_address, optimism_address, gnosis_address, stellar_address, zkevm_address, ethereum_classic_address, x, discord, telegram, instagram, facebook, github, linkedin, website, farcaster, youtube, reddit, lens FROM projects"
     )
     projects = cursor.fetchall()
     conn.close()
@@ -376,8 +379,8 @@ def get_all_projects():
             "giv_power_rank": row[4],
             "listed": bool(row[5]),
             "updated_at": row[6],
-            "description": row[7],
-            "givbacks_eligible": bool(row[8]),
+            "givbacks_eligible": bool(row[7]),
+            "description": row[8],
             "in_active_qf_round": bool(row[9]),
             "unique_donors": row[10],
             "owner_wallet": row[11],
