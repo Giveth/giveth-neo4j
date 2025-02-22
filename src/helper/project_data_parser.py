@@ -1,8 +1,19 @@
 from html_cleaner import clean_html
 from datetime import datetime
 
-EVM_NETWORKS_MAP = {"polygon": "137", "celo": "42220"}
-NON_EVM_NETWORKS_MAP = {"solana": "101", "stellar": "1500"}
+EVM_NETWORKS_MAP = {
+    "ethereum": 1,
+    "optimism": 10,
+    "polygon": 137,
+    "celo": 42220,
+    "base": 8453,
+    "arbitrum": 42161,
+    "gnosis": 100,
+    "zkevm": 1101,
+    "ethereum_classic": 61,
+}
+
+NON_EVM_NETWORKS_MAP = {"solana": 101, "stellar": 1500}
 
 SOCIALS_MAP = {
     "FACEBOOK": "facebook",
@@ -19,6 +30,7 @@ SOCIALS_MAP = {
     "GITHUB": "github",
 }
 
+
 def extract_flat_project_data(project_data):
     addresses = (
         project_data[10]
@@ -33,7 +45,7 @@ def extract_flat_project_data(project_data):
 
     extracted_addresses = {
         f"{network_name}_address": addresses.get(network_type.upper(), {}).get(
-            chain_id, None
+            str(chain_id), None
         )
         for network_type, network_map in {
             "EVM": EVM_NETWORKS_MAP,
@@ -47,7 +59,8 @@ def extract_flat_project_data(project_data):
     }
 
     extracted_social_links = {
-        SOCIALS_MAP[key]: value for key, value in socials.items() if key in SOCIALS_MAP
+        SOCIALS_MAP[social_type]: socials.get(social_type, None)
+        for social_type in SOCIALS_MAP.keys()
     }
 
     return {
@@ -55,7 +68,7 @@ def extract_flat_project_data(project_data):
         "title": project_data[1],
         "description": clean_html(project_data[2]) if project_data[2] else None,
         "raised_amount": float(project_data[3]) if project_data[3] else None,
-        "giv_backs_eligible": (
+        "givbacks_eligible": (
             bool(project_data[4]) if project_data[4] is not None else None
         ),
         "listed": bool(project_data[5]) if project_data[5] is not None else None,
@@ -72,4 +85,5 @@ def extract_flat_project_data(project_data):
         **extracted_addresses,
         **extracted_social_links,
         "giv_power": float(project_data[12]) if project_data[12] else None,
+        "giv_power_rank": int(project_data[13]) if project_data[13] else None,
     }

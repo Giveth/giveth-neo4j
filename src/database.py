@@ -58,15 +58,16 @@ def get_giveth_projects():
                             psm."type",
                             psm."link"
                         ) FILTER (WHERE psm."link" IS NOT NULL), '{}'::JSONB
-                    ) AS social_media
+                    ) AS social_media,
 
-                    -- pipv."totalPower"
+                    pipv."totalPower",
+                    pipv."powerRank"
 
                 FROM public.project p
                 LEFT JOIN project_qf_rounds_qf_round pqrq ON p.id = pqrq."projectId"
                 LEFT JOIN qf_round qfr ON qfr.id = pqrq."qfRoundId"
                 INNER JOIN public.user u ON p."adminUserId" = u.id
-                -- INNER JOIN public.project_instant_power_view pipv  ON p.id = pipv."projectId"
+                INNER JOIN public.project_instant_power_view pipv ON p.id = pipv."projectId"
 
                 LEFT JOIN (
                     SELECT 
@@ -83,9 +84,10 @@ def get_giveth_projects():
 
                 GROUP BY 
                     p.ID, p.TITLE, p.DESCRIPTION, p."totalDonations", p."giveBacks", 
-                    p."updatedAt", p.LISTED, qfr."isActive", u."walletAddress"
+                    p."updatedAt", p.LISTED, qfr."isActive", u."walletAddress", pipv."totalPower", pipv."powerRank"
 
                 LIMIT 1000;"""
+
         # Adjust as needed
         cursor.execute(query)
         projects = cursor.fetchall()
@@ -100,6 +102,7 @@ def get_giveth_projects():
 
 
 DB_PATH = "data/local_data.db"
+
 
 def create_tables():
     """Create tables for storing project chunks and embeddings."""
@@ -119,7 +122,7 @@ def create_tables():
     """
     )
 
-    # Project Table: Stores project id, title, raised_amount, giv_power
+    # Project Table: Stores project id, title, raised_amount, giv_power...
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS projects (
@@ -128,7 +131,38 @@ def create_tables():
             description TEXT,
             raised_amount REAL,
             giv_power REAL,
+            giv_power_rank INTEGER,
             listed BOOLEAN,
+            givbacks_eligible BOOLEAN,
+            in_active_qf_round BOOLEAN,
+            unique_donors INTEGER,
+            owner_wallet TEXT,
+
+            polygon_address TEXT,
+            celo_address TEXT,
+            base_address TEXT,
+            solana_address TEXT,
+            ethereum_address TEXT,
+            arbitrum_address TEXT,
+            optimism_address TEXT,
+            gnosis_address TEXT,
+            stellar_address TEXT,
+            zkevm_address TEXT,
+            ethereum_classic_address TEXT,
+
+            x TEXT,
+            discord TEXT,
+            telegram TEXT,
+            instagram TEXT,
+            facebook TEXT,
+            github TEXT,
+            linkedin TEXT,
+            website TEXT,
+            farcaster TEXT,
+            youtube TEXT,
+            reddit TEXT,
+            lens TEXT,
+
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
@@ -209,21 +243,113 @@ def test_add_chunk_twice():
 # insert project
 
 
-def insert_project(id, title, description, raised_amount, giv_power, listed):
+def insert_project(
+    id,
+    title,
+    description,
+    raised_amount,
+    giv_power,
+    giv_power_rank,
+    listed,
+    givbacks_eligible,
+    in_active_qf_round,
+    unique_donors,
+    updated_at,
+    owner_wallet,
+    addresses,
+    socials,
+):
     conn = get_sqlite_connection()
     cursor = conn.cursor()
+
     cursor.execute(
         """
-        INSERT INTO projects (id, title, description, raised_amount, giv_power, listed) 
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO projects (
+            id, title, description, raised_amount, giv_power, giv_power_rank, listed, 
+            givbacks_eligible, in_active_qf_round, unique_donors, owner_wallet, 
+            polygon_address, celo_address, base_address, solana_address, 
+            ethereum_address, arbitrum_address, optimism_address, gnosis_address, 
+            stellar_address, zkevm_address, ethereum_classic_address, x, 
+            discord, telegram, instagram, facebook, github, linkedin, website, 
+            farcaster, youtube, reddit, lens, updated_at
+        )
+        VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
         ON CONFLICT(id) DO UPDATE SET
-            title=excluded.title,
-            raised_amount=excluded.raised_amount,
-            giv_power=excluded.giv_power,
-            listed=excluded.listed,
-            description=excluded.description
+            title = excluded.title,
+            raised_amount = excluded.raised_amount,
+            giv_power = excluded.giv_power,
+            giv_power_rank = excluded.giv_power_rank,
+            listed = excluded.listed,
+            description = excluded.description,
+            givbacks_eligible = excluded.givbacks_eligible,
+            in_active_qf_round = excluded.in_active_qf_round,
+            unique_donors = excluded.unique_donors,
+            owner_wallet = excluded.owner_wallet,
+            polygon_address = excluded.polygon_address,
+            celo_address = excluded.celo_address,
+            base_address = excluded.base_address,
+            solana_address = excluded.solana_address,
+            ethereum_address = excluded.ethereum_address,
+            arbitrum_address = excluded.arbitrum_address,
+            optimism_address = excluded.optimism_address,
+            gnosis_address = excluded.gnosis_address,
+            stellar_address = excluded.stellar_address,
+            zkevm_address = excluded.zkevm_address,
+            ethereum_classic_address = excluded.ethereum_classic_address,
+            x = excluded.x,
+            discord = excluded.discord,
+            telegram = excluded.telegram,
+            instagram = excluded.instagram,
+            facebook = excluded.facebook,
+            github = excluded.github,
+            linkedin = excluded.linkedin,
+            website = excluded.website,
+            farcaster = excluded.farcaster,
+            youtube = excluded.youtube,
+            reddit = excluded.reddit,
+            lens = excluded.lens,
+            updated_at = excluded.updated_at
     """,
-        (id, title, description, raised_amount, giv_power, listed),
+        (
+            id,
+            title,
+            description,
+            raised_amount,
+            giv_power,
+            giv_power_rank,
+            listed,
+            givbacks_eligible,
+            in_active_qf_round,
+            unique_donors,
+            owner_wallet,
+            addresses.get("polygon", None),
+            addresses.get("celo", None),
+            addresses.get("base", None),
+            addresses.get("solana", None),
+            addresses.get("ethereum", None),
+            addresses.get("arbitrum", None),
+            addresses.get("optimism", None),
+            addresses.get("gnosis", None),
+            addresses.get("stellar", None),
+            addresses.get("zkevm", None),
+            addresses.get("ethereum_classic", None),
+            socials.get("x", None),
+            socials.get("discord", None),
+            socials.get("telegram", None),
+            socials.get("instagram", None),
+            socials.get("facebook", None),
+            socials.get("github", None),
+            socials.get("linkedin", None),
+            socials.get("website", None),
+            socials.get("farcaster", None),
+            socials.get("youtube", None),
+            socials.get("reddit", None),
+            socials.get("lens", None),
+            updated_at,
+        ),
     )
     conn.commit()
     conn.close()
@@ -236,7 +362,7 @@ def get_all_projects():
     conn = get_sqlite_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, title, raised_amount, giv_power, listed, updated_at, description FROM projects"
+        "SELECT id, title, raised_amount, giv_power, giv_power_rank, listed, updated_at, givbacks_eligible, description, in_active_qf_round, unique_donors, owner_wallet, polygon_address, celo_address, base_address, solana_address, ethereum_address, arbitrum_address, optimism_address, gnosis_address, stellar_address, zkevm_address, ethereum_classic_address, x, discord, telegram, instagram, facebook, github, linkedin, website, farcaster, youtube, reddit, lens, FROM projects"
     )
     projects = cursor.fetchall()
     conn.close()
@@ -247,9 +373,41 @@ def get_all_projects():
             "title": row[1],
             "raised_amount": row[2],
             "giv_power": row[3],
-            "listed": bool(row[4]),
-            "updated_at": row[5],
-            "description": row[6],
+            "giv_power_rank": row[4],
+            "listed": bool(row[5]),
+            "updated_at": row[6],
+            "description": row[7],
+            "givbacks_eligible": bool(row[8]),
+            "in_active_qf_round": bool(row[9]),
+            "unique_donors": row[10],
+            "owner_wallet": row[11],
+            "addresses": {
+                "polygon": row[12],
+                "celo": row[13],
+                "base": row[14],
+                "solana": row[15],
+                "ethereum": row[16],
+                "arbitrum": row[17],
+                "optimism": row[18],
+                "gnosis": row[19],
+                "stellar": row[20],
+                "zkevm": row[21],
+                "ethereum_classic": row[22],
+            },
+            "socials": {
+                "x": row[23],
+                "discord": row[24],
+                "telegram": row[25],
+                "instagram": row[26],
+                "facebook": row[27],
+                "github": row[28],
+                "linkedin": row[29],
+                "website": row[30],
+                "farcaster": row[31],
+                "youtube": row[32],
+                "reddit": row[33],
+                "lens": row[34],
+            },
         }
         for row in projects
     ]
