@@ -8,9 +8,13 @@ def generate_chunk_uuid(chunk_text):
 
 
 def chunk_text(content, chunk_size=512, chunk_overlap=50):
+    if not content:
+        return []
+
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size, chunk_overlap=chunk_overlap
     )
+
     return text_splitter.split_text(content)
 
 

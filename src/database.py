@@ -7,8 +7,11 @@ from decimal import Decimal
 from html_cleaner import clean_html
 import psycopg2
 from config import DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT
+from helper.project_data_parser import extract_flat_project_data
 
-CACHE_FILE = "data/projects_cache.json"
+PROJECT_CACHE_FILE = "data/projects_cache.json"
+PROJECT_CACHE_FILE = "data/donations_cache.json"
+DB_PATH = "data/local_data.db"
 
 
 def get_sqlite_connection():
@@ -20,53 +23,152 @@ def get_sqlite_connection():
 
 def get_giveth_projects():
     """Fetch projects from PostgreSQL and cache the result."""
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r") as f:
+    if os.path.exists(PROJECT_CACHE_FILE):
+        with open(PROJECT_CACHE_FILE, "r") as f:
             get_giveth_projects.cache = json.load(f)
     else:
         conn = psycopg2.connect(
-            host=DB_HOST, database=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
+            host=DB_HOST,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            port=DB_PORT,
         )
         cursor = conn.cursor()
 
         query = """SELECT
-                    ID,
-                    TITLE,
-                    DESCRIPTION,
-                    "totalDonations",
-                    "updatedAt",
-                    LISTED,
-                    "totalPower"
-                FROM
-                    PROJECT inner join public.project_instant_power_view  on project.id = project_instant_power_view."projectId"
-                WHERE
-                    LISTED = TRUE
+                    p.ID,
+                    p.TITLE,
+                    p.DESCRIPTION,
+                    p."totalDonations",
+                    p."giveBacks",
+                    p.LISTED,
+                    p."countUniqueDonors",
+                    p."updatedAt",
+                    u."walletAddress",
+                    qfr."isActive",
+
+                    COALESCE(
+                        JSONB_OBJECT_AGG(
+                            pa."chainType",
+                            pa.networks
+                        ) FILTER (WHERE pa."chainType" IS NOT NULL), '{}'::JSONB
+                    ) AS addresses,
+
+                    COALESCE(
+                        JSONB_OBJECT_AGG(
+                            psm."type",
+                            psm."link"
+                        ) FILTER (WHERE psm."link" IS NOT NULL), '{}'::JSONB
+                    ) AS social_media,
+
+                    pipv."totalPower",
+                    pipv."powerRank"
+
+                FROM public.project p
+                LEFT JOIN project_qf_rounds_qf_round pqrq ON p.id = pqrq."projectId"
+                LEFT JOIN qf_round qfr ON qfr.id = pqrq."qfRoundId"
+                INNER JOIN public.user u ON p."adminUserId" = u.id
+                INNER JOIN public.project_instant_power_view pipv ON p.id = pipv."projectId"
+
+                LEFT JOIN (
+                    SELECT 
+                        pa."projectId",
+                        pa."chainType",
+                        JSONB_OBJECT_AGG(pa."networkId", pa."address") AS networks
+                    FROM public.project_address pa
+                    GROUP BY pa."projectId", pa."chainType"
+                ) pa ON p.id = pa."projectId"
+
+                LEFT JOIN public.project_social_media psm ON p.id = psm."projectId"
+
+                WHERE p.LISTED = TRUE
+
+                GROUP BY 
+                    p.ID, p.TITLE, p.DESCRIPTION, p."totalDonations", p."giveBacks", 
+                    p."updatedAt", p.LISTED, qfr."isActive", u."walletAddress", pipv."totalPower", pipv."powerRank"
+
                 ORDER BY
-                    "totalPower" DESC
-                LIMIT
-                    1000;"""
+	                pipv."totalPower" DESC
+
+                LIMIT 100;"""
+
         # Adjust as needed
         cursor.execute(query)
         projects = cursor.fetchall()
 
         conn.close()
-        get_giveth_projects.cache = [{
-            "id": p[0],
-            "title": p[1],
-            "description": clean_html(p[2]),
-            "raised_amount": p[3],
-            "updated_at": p[4].isoformat() if p[4] else None,
-            "listed": bool(p[5]),
-            "giv_power": float(p[6]),
-        } for p in projects]
+        get_giveth_projects.cache = [extract_flat_project_data(p) for p in projects]
 
-        with open(CACHE_FILE, "w") as f:
+        with open(PROJECT_CACHE_FILE, "w") as f:
             json.dump(get_giveth_projects.cache, f)
 
     return get_giveth_projects.cache
 
 
-DB_PATH = "data/local_data.db"
+def get_giveth_donations():
+    """Fetch donations from PostgreSQL."""
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        port=DB_PORT,
+    )
+    cursor = conn.cursor()
+
+    query = """SELECT
+                DONATION.id,
+                "projectId",
+                "transactionId",
+                "toWalletAddress",
+                "fromWalletAddress",
+                currency,
+                "anonymous",
+                DONATION.amount,
+                "valueUsd",
+                "createdAt",
+                "transactionNetworkId",
+                "tokenAddress",
+                "chainType"
+            FROM
+                DONATION
+                INNER JOIN (
+                    SELECT
+                        ID,
+                        "totalPower" AMOUNT
+                    FROM
+                        PROJECT
+                        INNER JOIN PUBLIC.PROJECT_INSTANT_POWER_VIEW PIPV ON PROJECT.ID = PIPV."projectId"
+                    ORDER BY
+                        PIPV."totalPower" DESC
+                    LIMIT
+                        100
+                ) AS P ON DONATION."projectId" = P.ID
+                WHERE DONATION."valueUsd" >= 1
+    """
+
+    cursor.execute(query)
+    donations = cursor.fetchall()
+    conn.close()
+
+    return [
+        {
+            "id": donation[0],
+            "projectId": donation[1],
+            "transactionId": donation[2],
+            "toWalletAddress": donation[3],
+            "fromWalletAddress": donation[4],
+            "currency": donation[5],
+            "anonymous": donation[6],
+            "amount": donation[7],
+            "valueUsd": donation[8],
+            "createdAt": donation[9].isoformat() if donation[9] else None,
+            "transactionNetworkId": donation[10],
+            "tokenAddress": donation[11],
+            "chainType": donation[12],
+        } for donation in donations
+    ]
 
 
 def create_tables():
@@ -75,7 +177,8 @@ def create_tables():
     cursor = conn.cursor()
 
     # Chunks Table: Stores tokenized descriptions
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS chunks (
             id TEXT PRIMARY KEY,  -- UUID of the chunk
             project_id INTEGER,
@@ -83,23 +186,79 @@ def create_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             embedding BLOB
         )
-    """)
+    """
+    )
 
-    # Project Table: Stores project id, title, raised_amount, giv_power
-    cursor.execute("""
+    # Project Table: Stores project id, title, raised_amount, giv_power...
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY,
             title TEXT,
             description TEXT,
             raised_amount REAL,
             giv_power REAL,
+            giv_power_rank INTEGER,
             listed BOOLEAN,
+            givbacks_eligible BOOLEAN,
+            in_active_qf_round BOOLEAN,
+            unique_donors INTEGER,
+            owner_wallet TEXT,
+
+            polygon_address TEXT,
+            celo_address TEXT,
+            base_address TEXT,
+            solana_address TEXT,
+            ethereum_address TEXT,
+            arbitrum_address TEXT,
+            optimism_address TEXT,
+            gnosis_address TEXT,
+            stellar_address TEXT,
+            zkevm_address TEXT,
+            ethereum_classic_address TEXT,
+
+            x TEXT,
+            discord TEXT,
+            telegram TEXT,
+            instagram TEXT,
+            facebook TEXT,
+            github TEXT,
+            linkedin TEXT,
+            website TEXT,
+            farcaster TEXT,
+            youtube TEXT,
+            reddit TEXT,
+            lens TEXT,
+
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+    """
+    )
+
+    # Donation with id, "txHash", "toAddress", "fromAddress", currency, "anonymous", amount, "valueUsd", "createdAt", "chainId", "tokenAddress", "chainType"
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS donations (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER,
+            tx_hash TEXT,
+            to_address TEXT,
+            from_address TEXT,
+            currency TEXT,
+            anonymous BOOLEAN,
+            amount REAL,
+            value_usd REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            chain_id INTEGER,
+            token_address TEXT,
+            chain_type TEXT
+        )
+    """
+    )
 
     conn.commit()
     conn.close()
+
 
 # insert_chunk function
 
@@ -108,8 +267,10 @@ def insert_chunk(uuid, text, project_id):
     conn = get_sqlite_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO chunks (id, text, project_id) VALUES (?, ?, ?)",
-                       (uuid, text, project_id))
+        cursor.execute(
+            "INSERT INTO chunks (id, text, project_id) VALUES (?, ?, ?)",
+            (uuid, text, project_id),
+        )
         conn.commit()
     except sqlite3.IntegrityError:
         # Ignore if the chunk with the same UUID already exists
@@ -117,23 +278,24 @@ def insert_chunk(uuid, text, project_id):
     finally:
         conn.close()
 
+
 # get_chunk function by id
 
 
 def get_chunk(uuid):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, text, embedding FROM chunks WHERE id = ?", (uuid,))
+    cursor.execute("SELECT id, text, embedding FROM chunks WHERE id = ?", (uuid,))
     row = cursor.fetchone()
     conn.close()
     if row:
         return {
             "id": row[0],
             "text": row[1],
-            "embedding": json.loads(row[2]) if row[2] else None
+            "embedding": json.loads(row[2]) if row[2] else None,
         }
     return None
+
 
 # add_chunk_embedding function
 
@@ -141,8 +303,9 @@ def get_chunk(uuid):
 def set_chunk_embedding(uuid, embedding):
     conn = get_sqlite_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE chunks SET embedding = ? WHERE id = ?",
-                   (json.dumps(embedding), uuid))
+    cursor.execute(
+        "UPDATE chunks SET embedding = ? WHERE id = ?", (json.dumps(embedding), uuid)
+    )
     conn.commit()
     conn.close()
 
@@ -164,22 +327,166 @@ def test_add_chunk_twice():
     conn.close()
     assert count == 1, "Chunk was added twice!"
 
+
 # insert project
 
 
-def insert_project(id, title, description, raised_amount, giv_power, listed):
+def insert_project(
+    id,
+    title,
+    description,
+    raised_amount,
+    giv_power,
+    giv_power_rank,
+    listed,
+    givbacks_eligible,
+    in_active_qf_round,
+    unique_donors,
+    updated_at,
+    owner_wallet,
+    addresses,
+    socials,
+):
     conn = get_sqlite_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO projects (id, title, description, raised_amount, giv_power, listed) 
-        VALUES (?, ?, ?, ?, ?, ?)
+
+    cursor.execute(
+        """
+        INSERT INTO projects (
+            id, title, description, raised_amount, giv_power, giv_power_rank, listed, 
+            givbacks_eligible, in_active_qf_round, unique_donors, owner_wallet, 
+            polygon_address, celo_address, base_address, solana_address, 
+            ethereum_address, arbitrum_address, optimism_address, gnosis_address, 
+            stellar_address, zkevm_address, ethereum_classic_address, x, 
+            discord, telegram, instagram, facebook, github, linkedin, website, 
+            farcaster, youtube, reddit, lens, updated_at
+        )
+        VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
         ON CONFLICT(id) DO UPDATE SET
-            title=excluded.title,
-            raised_amount=excluded.raised_amount,
-            giv_power=excluded.giv_power,
-            listed=excluded.listed,
-            description=excluded.description
-    """, (id, title, description, raised_amount, giv_power, listed))
+            title = excluded.title,
+            raised_amount = excluded.raised_amount,
+            giv_power = excluded.giv_power,
+            giv_power_rank = excluded.giv_power_rank,
+            listed = excluded.listed,
+            description = excluded.description,
+            givbacks_eligible = excluded.givbacks_eligible,
+            in_active_qf_round = excluded.in_active_qf_round,
+            unique_donors = excluded.unique_donors,
+            owner_wallet = excluded.owner_wallet,
+            polygon_address = excluded.polygon_address,
+            celo_address = excluded.celo_address,
+            base_address = excluded.base_address,
+            solana_address = excluded.solana_address,
+            ethereum_address = excluded.ethereum_address,
+            arbitrum_address = excluded.arbitrum_address,
+            optimism_address = excluded.optimism_address,
+            gnosis_address = excluded.gnosis_address,
+            stellar_address = excluded.stellar_address,
+            zkevm_address = excluded.zkevm_address,
+            ethereum_classic_address = excluded.ethereum_classic_address,
+            x = excluded.x,
+            discord = excluded.discord,
+            telegram = excluded.telegram,
+            instagram = excluded.instagram,
+            facebook = excluded.facebook,
+            github = excluded.github,
+            linkedin = excluded.linkedin,
+            website = excluded.website,
+            farcaster = excluded.farcaster,
+            youtube = excluded.youtube,
+            reddit = excluded.reddit,
+            lens = excluded.lens,
+            updated_at = excluded.updated_at
+    """,
+        (
+            id,
+            title,
+            description,
+            raised_amount,
+            giv_power,
+            giv_power_rank,
+            listed,
+            givbacks_eligible,
+            in_active_qf_round,
+            unique_donors,
+            owner_wallet,
+            addresses.get("polygon", None),
+            addresses.get("celo", None),
+            addresses.get("base", None),
+            addresses.get("solana", None),
+            addresses.get("ethereum", None),
+            addresses.get("arbitrum", None),
+            addresses.get("optimism", None),
+            addresses.get("gnosis", None),
+            addresses.get("stellar", None),
+            addresses.get("zkevm", None),
+            addresses.get("ethereum_classic", None),
+            socials.get("x", None),
+            socials.get("discord", None),
+            socials.get("telegram", None),
+            socials.get("instagram", None),
+            socials.get("facebook", None),
+            socials.get("github", None),
+            socials.get("linkedin", None),
+            socials.get("website", None),
+            socials.get("farcaster", None),
+            socials.get("youtube", None),
+            socials.get("reddit", None),
+            socials.get("lens", None),
+            updated_at,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def insert_donation(
+    id,
+    project_id,
+    tx_hash,
+    to_address,
+    from_address,
+    currency,
+    anonymous,
+    amount,
+    value_usd,
+    created_at,
+    chain_id,
+    token_address,
+    chain_type,
+):
+    """ Insert a donation into the SQLite database. """
+
+    conn = get_sqlite_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO donations (
+            id, project_id, tx_hash, to_address, from_address, currency, anonymous, amount, value_usd, created_at, chain_id, token_address, chain_type
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+    """,
+        (
+            id,
+            project_id,
+            tx_hash,
+            to_address,
+            from_address,
+            currency,
+            anonymous,
+            amount,
+            value_usd,
+            created_at,
+            chain_id,
+            token_address,
+            chain_type,
+        ),
+    )
     conn.commit()
     conn.close()
 
@@ -191,7 +498,8 @@ def get_all_projects():
     conn = get_sqlite_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, title, raised_amount, giv_power, listed, updated_at, description FROM projects")
+        "SELECT id, title, raised_amount, giv_power, giv_power_rank, listed, updated_at, givbacks_eligible, description, in_active_qf_round, unique_donors, owner_wallet, polygon_address, celo_address, base_address, solana_address, ethereum_address, arbitrum_address, optimism_address, gnosis_address, stellar_address, zkevm_address, ethereum_classic_address, x, discord, telegram, instagram, facebook, github, linkedin, website, farcaster, youtube, reddit, lens FROM projects"
+    )
     projects = cursor.fetchall()
     conn.close()
 
@@ -201,11 +509,75 @@ def get_all_projects():
             "title": row[1],
             "raised_amount": row[2],
             "giv_power": row[3],
-            "listed": bool(row[4]),
-            "updated_at": row[5],
-            "description": row[6]
+            "giv_power_rank": row[4],
+            "listed": bool(row[5]),
+            "updated_at": row[6],
+            "givbacks_eligible": bool(row[7]),
+            "description": row[8],
+            "in_active_qf_round": bool(row[9]),
+            "unique_donors": row[10],
+            "owner_wallet": row[11],
+            "addresses": {
+                "polygon": row[12],
+                "celo": row[13],
+                "base": row[14],
+                "solana": row[15],
+                "ethereum": row[16],
+                "arbitrum": row[17],
+                "optimism": row[18],
+                "gnosis": row[19],
+                "stellar": row[20],
+                "zkevm": row[21],
+                "ethereum_classic": row[22],
+            },
+            "socials": {
+                "x": row[23],
+                "discord": row[24],
+                "telegram": row[25],
+                "instagram": row[26],
+                "facebook": row[27],
+                "github": row[28],
+                "linkedin": row[29],
+                "website": row[30],
+                "farcaster": row[31],
+                "youtube": row[32],
+                "reddit": row[33],
+                "lens": row[34],
+            },
         }
         for row in projects
+    ]
+
+
+def get_all_donations():
+    """
+    Fetch all donations from SQLite.
+    """
+    conn = get_sqlite_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, project_id, tx_hash, to_address, from_address, currency, anonymous, amount, value_usd, created_at, chain_id, token_address, chain_type FROM donations"
+    )
+    donations = cursor.fetchall()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "project_id": row[1],
+            "tx_hash": row[2],
+            "to_address": row[3],
+            "from_address": row[4],
+            "currency": row[5],
+            "anonymous": bool(row[6]),
+            "amount": row[7],
+            "value_usd": row[8],
+            "created_at": row[9],
+            "chain_id": row[10],
+            "token_address": row[11],
+            "chain_type": row[12],
+        }
+        for row in donations
     ]
 
 
@@ -216,7 +588,8 @@ def get_all_chunks():
     conn = get_sqlite_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, project_id, text, created_at, embedding FROM chunks WHERE embedding IS NOT NULL")
+        "SELECT id, project_id, text, created_at, embedding FROM chunks WHERE embedding IS NOT NULL"
+    )
     chunks = cursor.fetchall()
     conn.close()
 
@@ -232,16 +605,17 @@ def get_all_chunks():
             # Safely parse the string to a Python list
             embedding_array = ast.literal_eval(embedding_blob)
         else:
-            embedding_array = np.frombuffer(
-                embedding_blob, dtype=np.float32).tolist()
+            embedding_array = np.frombuffer(embedding_blob, dtype=np.float32).tolist()
 
-        formatted_chunks.append({
-            "id": row[0],
-            "project_id": row[1],
-            "text": row[2],
-            "created_at": row[3],
-            "embedding": embedding_array
-        })
+        formatted_chunks.append(
+            {
+                "id": row[0],
+                "project_id": row[1],
+                "text": row[2],
+                "created_at": row[3],
+                "embedding": embedding_array,
+            }
+        )
 
     return formatted_chunks
 
