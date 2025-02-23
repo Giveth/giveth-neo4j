@@ -1,4 +1,4 @@
-from database import get_all_chunks, get_all_projects
+from database import get_all_chunks, get_all_projects, get_all_donations
 from neo4j import GraphDatabase
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
@@ -114,6 +114,38 @@ def insert_chunks_to_neo4j():
             session.run(query, data=chunks)
 
 
+def insert_donations_to_neo4j():
+    """
+    Insert all donations from SQLite into Neo4j.
+    """
+    donations = get_all_donations()
+
+    query = """
+    UNWIND $data AS row
+    MATCH (p:Project {id: row.project_id})  // Ensure the project exists
+    MERGE (d:Donation {id: row.id})
+    ON CREATE SET 
+        d.id = row.id,
+        d.project_id = row.project_id,
+        d.tx_hash = row.tx_hash,
+        d.to_address = row.to_address,
+        d.from_address = row.from_address,
+        d.currency = row.currency,
+        d.anonymous = row.anonymous,
+        d.amount = row.amount,
+        d.value_usd = row.value_usd,
+        d.created_at = row.created_at,
+        d.chain_id = row.chain_id,
+        d.token_address = row.token_address,
+        d.chain_type = row.chain_type
+    MERGE (p)-[:HAS_DONATION]->(d)  // Create relationship
+    """
+
+    with get_neo4j_driver() as driver:
+        with driver.session() as session:
+            session.run(query, data=donations)
+
+
 if __name__ == "__main__":
     from neo4j import GraphDatabase
 
@@ -135,3 +167,7 @@ if __name__ == "__main__":
     # Example Usage
     insert_chunks_to_neo4j()
     print("✅ Chunks inserted and linked to projects in Neo4j!")
+
+    # Example Usage
+    insert_donations_to_neo4j()
+    print("✅ Donations inserted into Neo4j!")

@@ -171,7 +171,6 @@ def get_giveth_donations():
     ]
 
 
-
 def create_tables():
     """Create tables for storing project chunks and embeddings."""
     conn = get_sqlite_connection()
@@ -547,6 +546,38 @@ def get_all_projects():
             },
         }
         for row in projects
+    ]
+
+
+def get_all_donations():
+    """
+    Fetch all donations from SQLite.
+    """
+    conn = get_sqlite_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, project_id, tx_hash, to_address, from_address, currency, anonymous, amount, value_usd, created_at, chain_id, token_address, chain_type FROM donations"
+    )
+    donations = cursor.fetchall()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "project_id": row[1],
+            "tx_hash": row[2],
+            "to_address": row[3],
+            "from_address": row[4],
+            "currency": row[5],
+            "anonymous": bool(row[6]),
+            "amount": row[7],
+            "value_usd": row[8],
+            "created_at": row[9],
+            "chain_id": row[10],
+            "token_address": row[11],
+            "chain_type": row[12],
+        }
+        for row in donations
     ]
 
 
