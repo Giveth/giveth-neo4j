@@ -9,7 +9,9 @@ import psycopg2
 from config import DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT
 from helper.project_data_parser import extract_flat_project_data
 
-CACHE_FILE = "data/projects_cache2.json"
+PROJECT_CACHE_FILE = "data/projects_cache.json"
+PROJECT_CACHE_FILE = "data/donations_cache.json"
+DB_PATH = "data/local_data.db"
 
 
 def get_sqlite_connection():
@@ -21,8 +23,8 @@ def get_sqlite_connection():
 
 def get_giveth_projects():
     """Fetch projects from PostgreSQL and cache the result."""
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r") as f:
+    if os.path.exists(PROJECT_CACHE_FILE):
+        with open(PROJECT_CACHE_FILE, "r") as f:
             get_giveth_projects.cache = json.load(f)
     else:
         conn = psycopg2.connect(
@@ -89,7 +91,7 @@ def get_giveth_projects():
                 ORDER BY
 	                pipv."totalPower" DESC
 
-                LIMIT 1000;"""
+                LIMIT 100;"""
 
         # Adjust as needed
         cursor.execute(query)
@@ -98,13 +100,76 @@ def get_giveth_projects():
         conn.close()
         get_giveth_projects.cache = [extract_flat_project_data(p) for p in projects]
 
-        with open(CACHE_FILE, "w") as f:
+        with open(PROJECT_CACHE_FILE, "w") as f:
             json.dump(get_giveth_projects.cache, f)
 
     return get_giveth_projects.cache
 
 
-DB_PATH = "data/local_data.db"
+def get_giveth_donations():
+    """Fetch donations from PostgreSQL."""
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        port=DB_PORT,
+    )
+    cursor = conn.cursor()
+
+    query = """SELECT
+                DONATION.id,
+                "projectId",
+                "transactionId",
+                "toWalletAddress",
+                "fromWalletAddress",
+                currency,
+                "anonymous",
+                DONATION.amount,
+                "valueUsd",
+                "createdAt",
+                "transactionNetworkId",
+                "tokenAddress",
+                "chainType"
+            FROM
+                DONATION
+                INNER JOIN (
+                    SELECT
+                        ID,
+                        "totalPower" AMOUNT
+                    FROM
+                        PROJECT
+                        INNER JOIN PUBLIC.PROJECT_INSTANT_POWER_VIEW PIPV ON PROJECT.ID = PIPV."projectId"
+                    ORDER BY
+                        PIPV."totalPower" DESC
+                    LIMIT
+                        100
+                ) AS P ON DONATION."projectId" = P.ID
+                WHERE DONATION."valueUsd" >= 1
+    """
+
+    cursor.execute(query)
+    donations = cursor.fetchall()
+    conn.close()
+
+    return [
+        {
+            "id": donation[0],
+            "projectId": donation[1],
+            "transactionId": donation[2],
+            "toWalletAddress": donation[3],
+            "fromWalletAddress": donation[4],
+            "currency": donation[5],
+            "anonymous": donation[6],
+            "amount": donation[7],
+            "valueUsd": donation[8],
+            "createdAt": donation[9].isoformat() if donation[9] else None,
+            "transactionNetworkId": donation[10],
+            "tokenAddress": donation[11],
+            "chainType": donation[12],
+        } for donation in donations
+    ]
+
 
 
 def create_tables():
@@ -167,6 +232,27 @@ def create_tables():
             lens TEXT,
 
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+
+    # Donation with id, "txHash", "toAddress", "fromAddress", currency, "anonymous", amount, "valueUsd", "createdAt", "chainId", "tokenAddress", "chainType"
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS donations (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER,
+            tx_hash TEXT,
+            to_address TEXT,
+            from_address TEXT,
+            currency TEXT,
+            anonymous BOOLEAN,
+            amount REAL,
+            value_usd REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            chain_id INTEGER,
+            token_address TEXT,
+            chain_type TEXT
         )
     """
     )
@@ -352,6 +438,54 @@ def insert_project(
             socials.get("reddit", None),
             socials.get("lens", None),
             updated_at,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def insert_donation(
+    id,
+    project_id,
+    tx_hash,
+    to_address,
+    from_address,
+    currency,
+    anonymous,
+    amount,
+    value_usd,
+    created_at,
+    chain_id,
+    token_address,
+    chain_type,
+):
+    """ Insert a donation into the SQLite database. """
+
+    conn = get_sqlite_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO donations (
+            id, project_id, tx_hash, to_address, from_address, currency, anonymous, amount, value_usd, created_at, chain_id, token_address, chain_type
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+    """,
+        (
+            id,
+            project_id,
+            tx_hash,
+            to_address,
+            from_address,
+            currency,
+            anonymous,
+            amount,
+            value_usd,
+            created_at,
+            chain_id,
+            token_address,
+            chain_type,
         ),
     )
     conn.commit()

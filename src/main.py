@@ -1,7 +1,7 @@
 import openai
 import sqlite3
 from chunking import chunk_text, generate_chunk_uuid
-from database import DB_PATH, insert_chunk, get_giveth_projects, insert_project
+from database import DB_PATH, get_giveth_donations, insert_chunk, get_giveth_projects, insert_donation, insert_project
 from config import OPENAI_API_KEY
 from embedding import embed_chunk
 
@@ -65,3 +65,21 @@ if __name__ == "__main__":
             embed_chunk(uuid)
             print(uuid)
             print("-" * 40)
+
+    donations = get_giveth_donations()
+    for donation in donations:
+        insert_donation(
+            id=donation["id"],
+            project_id=donation["projectId"],
+            tx_hash=donation["transactionId"],
+            to_address=donation["toWalletAddress"],
+            from_address=donation["fromWalletAddress"],
+            currency=donation["currency"],
+            anonymous=donation["anonymous"],
+            amount=donation["amount"],
+            value_usd=donation["valueUsd"],
+            created_at=donation["createdAt"],
+            chain_id=donation["transactionNetworkId"],
+            token_address=donation["tokenAddress"],
+            chain_type=donation["chainType"],
+        )
