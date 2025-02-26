@@ -1,19 +1,25 @@
-from database import get_chunk, set_chunk_embedding
+import logging
+from database import ChunkManager
 from utils.openai import generate_embedding
 
-def embed_chunk(uuid):
-    # check embedding exists on db
-    chunk = get_chunk(uuid)
+logging.basicConfig(level=logging.INFO)
+
+
+def embed_chunk(uuid: str) -> None:
+    """Embeds a text chunk if it is not already embedded."""
+    chunk = ChunkManager.get_chunk(uuid)
     if chunk is None:
-        print(f"Error: Chunk with ID {uuid} not found.")
+        logging.error(f"Chunk with ID {uuid} not found.")
         return
 
-    if not chunk["embedding"]:
+    if not chunk.get("embedding"):
         embedding = generate_embedding(chunk["text"])
-        set_chunk_embedding(uuid, embedding)
+        ChunkManager.set_embedding(uuid, embedding)
+        logging.info(f"Embedding stored for chunk ID: {uuid}")
 
-# Test
+
 if __name__ == "__main__":
+    # Example usage
     text = "This project restores biodiversity in Costa Rica."
     embedding = generate_embedding(text)
     print(f"Embedding size: {len(embedding)}")

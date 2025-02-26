@@ -1,187 +1,217 @@
 import re
+import json
+from typing import Dict, Any, List, Optional
 from utils.openai import generate_embedding, openai_client
 from neo4j_utils import get_neo4j_driver
-import json
 
 
-def check_if_embedding_needed(request, schema_hint):
-    print(f"request: {request}")
-    """
-    Ask the LLM if an embedding is needed for the query.
-    """
-    prompt = f"""
-    Schema Information:
-    {schema_hint}
-    -----------------------------------
-    Output Format: {request['output_format']}
-    -----------------------------------
+class CypherQueryProcessor:
+    """Class for handling Neo4j query generation using LLM assistance."""
 
-    The user has requested what came below:
-    BEGINIG OF THE QUERY:
-    {request['query']}
-    END OF THE QUERY
+    def __init__(self, schema_hint: str):
+        """Initialize with the database schema information."""
+        self.schema_hint = schema_hint
 
-    By looking at the query, I want you to infer whether any semantic search is needed or not.
-    I mean should I should search for project chunk with similar meaning to the query or not.
-    If it's needed, please provide a message that can be used to generate an embedding.
-    For example, if the query asks "provide me 2 projects related to climate change impact on renewable energy", you must provide a message like "climate change impact on renewable energy" as the embedding message.
-    But if the intention is  random projects or random donations, then no embedding is needed, and you should return {{"embedding_needed": "False"}}.
-
-
-
-    Now, please tell me does the query need an embedding? Respond strictly in this JSON format:
-    {{
-        "embedding_needed": True/False,
-        "embedding_message": "message to embed"
-    }}
-    """
-    response = openai_client.completions.create(
-        model="gpt-3.5-turbo-instruct",
-        prompt=prompt,
-        max_tokens=100,
-        temperature=0.3,
-    )
-    result = response.choices[0].text.strip()
-    result = re.sub(r'("embedding_needed": )false', r"\1False", result)
-    result = re.sub(r'("embedding_needed": )true', r"\1True", result)
-    print(f"Embedding Check Result: {result}")
-    return eval(result)  # Convert the JSON-like string to a dictionary
-
-
-def generate_neo4j_query(request, schema_hint, embedding_message=None, embedding=None):
-    """
-    Ask the LLM to generate a Cypher query based on the request and optional embedding.
-    """
-    prompt = f"""
-    Schema Information:
-    {schema_hint}
-
-    -------------------------------------------
-    Query: "{request['query']}"
-    Output Format: {request['output_format']}
-    -------------------------------------------
-    """
-
-    # If embedding is provided, include it in the prompt
-    if embedding:
-        prompt += f"""
-        I have embedding of {embedding_message}.
-        If you want to use it, I will pass it as a parmeter named queryVector.
-        Please for similarity use gds.similarity.cosine(c.embedding, $queryVector) as similarity with threshohd more than 0.8  if you need.
+    def process_user_request(self, request: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Full workflow for processing a user's request:
+        1. Checks if embedding is needed.
+        2. Generates an embedding if applicable.
+        3. Generates and executes the Cypher query.
+        4. Returns query results.
         """
 
-    prompt += """
-    Generate a Cypher query that can be executed on Neo4j to fulfill the request.
+        # Check if semantic search is needed
+        embedding_info = self._check_embedding_requirement(request)
+        print(f"Embedding Check: {embedding_info}")
 
-    Return only the Cypher query, no additional commentary.
-    """
+        # Generate embedding if needed
+        embedding, embedding_message = None, None
+        if embedding_info["embedding_needed"]:
+            embedding_message = embedding_info["embedding_message"]
+            embedding = generate_embedding(embedding_message)
+            print(
+                f"Generated embedding for: '{embedding_message}' (first 5 values: {embedding[:5]}...)"
+            )
 
-    print(f"prompt: {prompt}")
+        # Generate Cypher query
+        cypher_query: str = self._generate_cypher_query(
+            request, embedding_message, embedding
+        )
+        print(f"Generated Cypher Query: {cypher_query}")
 
-    response = openai_client.completions.create(
-        model="gpt-3.5-turbo-instruct",
-        prompt=prompt,
-        max_tokens=300,
-        temperature=0.3,
-    )
-    # Replace the similarity function
-    cypher_query = response.choices[0].text.strip()
-    cypher_query = cypher_query.replace(
-        "gds.alpha.similarity.cosine", "gds.similarity.cosine"
-    )
-    cypher_query = cypher_query.replace("gds.alpha.pageRank", "gds.pageRank")
-    return cypher_query
+        # Execute query with parameters
+        parameters = {"queryVector": embedding} if embedding else {}
+        results = self._execute_query(cypher_query, parameters)
 
+        return results
 
-def process_user_request(request, schema_hint):
-    """
-    Full workflow for processing a user's request: check embedding, generate query, and return results.
-    """
-    # Step 1: Check if embedding is needed
-    embedding_check = check_if_embedding_needed(request, schema_hint)
-    print(f"Embedding Check: {embedding_check}")
+    def _check_embedding_requirement(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Determine if semantic search (embedding) is needed for the query.
+        Returns a JSON with embedding_needed flag and embedding_message if needed.
+        """
+        print(f"Processing request: {request}")
 
-    if embedding_check["embedding_needed"]:
-        # Step 2: Generate the embedding
-        embedding_message = embedding_check["embedding_message"]
-        # Your embedding generation function
-        embedding = generate_embedding(embedding_message)
-        print(f"Generated Embedding for '{embedding_message}': {embedding[:5]}...")
-    else:
-        embedding_message = None
-        embedding = None
+        prompt: str = f"""
+        Schema Information:
+        {self.schema_hint}
+        -----------------------------------
+        Output Format: {request['output_format']}
+        -----------------------------------
 
-    # Step 3: Generate the Cypher query
-    cypher_query = generate_neo4j_query(
-        request, schema_hint, embedding_message=embedding_message, embedding=embedding
-    )
-    print(f"Generated Cypher Query: {cypher_query}")
+        The user has requested what came below:
+        BEGINIG OF THE QUERY:
+        {request['query']}
+        END OF THE QUERY
 
-    if embedding:
-        parameters = {
-            "queryVector": embedding,
-        }  # Pass query embedding
-    else:
-        parameters = {}
+        By looking at the query, determine whether semantic search is needed or not.
+        Specifically, should I search for project chunks with similar meaning to the query?
+        
+        If semantic search is needed, provide a concise message that can be used to generate an embedding.
+        For example, if the query asks "provide me 2 projects related to climate change impact on renewable energy", 
+        you should provide "climate change impact on renewable energy" as the embedding message.
 
-    # Step 4: Execute the query
-    # Your Neo4j execution function
-    results = execute_cypher_query(cypher_query, parameters)
-    return results
+        If the intention is to find random projects or random donations, then no embedding is needed, 
+        and you should return {{"embedding_needed": False}}.
 
+        Respond strictly in this JSON format:
+        {{
+            "embedding_needed": True/False,
+            "embedding_message": "message to embed" 
+        }}
 
-def execute_cypher_query(cypher_query, parameters):
-    with get_neo4j_driver() as driver:
-        with driver.session() as session:
-            result = session.run(cypher_query, parameters=parameters)
-            return [record.data() for record in result]
+        Note: Only include "embedding_message" if "embedding_needed" is True.
+        """
 
+        response = openai_client.completions.create(
+            model="gpt-3.5-turbo-instruct",
+            prompt=prompt,
+            max_tokens=100,
+            temperature=0.3,
+        )
+
+        result: str = response.choices[0].text.strip()
+
+        # Ensure proper JSON formatting
+        result = re.sub(r'("embedding_needed": )false', r"\1False", result)
+        result = re.sub(r'("embedding_needed": )true', r"\1True", result)
+
+        print(f"Embedding Check Result: {result}")
+
+        try:
+            return json.loads(result)  # Safe JSON parsing
+        except json.JSONDecodeError:
+            return {
+                "embedding_needed": False,
+                "embedding_message": "",
+            }  # Default fallback
+
+    def _generate_cypher_query(
+        self,
+        request: Dict[str, Any],
+        embedding_message: Optional[str] = None,
+        embedding: Optional[List[float]] = None,
+    ) -> str:
+        """
+        Generates a Cypher query for Neo4j based on the user's request.
+        Uses embedding for semantic similarity search if available.
+        """
+        prompt: str = f"""
+        Schema Information:
+        {self.schema_hint}
+
+        -------------------------------------------
+        Query: "{request['query']}"
+        Output Format: {request['output_format']}
+        -------------------------------------------
+        """
+
+        if embedding:
+            prompt += f"""
+            I have embedding of {embedding_message}.
+            If you want to use it, I will pass it as a parameter named queryVector.
+            Please for similarity use gds.similarity.cosine(c.embedding, $queryVector) as similarity with threshold more than 0.8 if you need.
+            """
+
+        prompt += """
+        Generate a Cypher query that can be executed on Neo4j to fulfill the request.
+
+        Return only the Cypher query, no additional commentary.
+        """
+
+        print(f"Generated Prompt: {prompt}")
+
+        response = openai_client.completions.create(
+            model="gpt-3.5-turbo-instruct",
+            prompt=prompt,
+            max_tokens=300,
+            temperature=0.3,
+        )
+
+        cypher_query: str = response.choices[0].text.strip()
+
+        # Update deprecated function names
+        cypher_query = self._update_deprecated_functions(cypher_query)
+
+        return cypher_query
+
+    def _update_deprecated_functions(self, query: str) -> str:
+        """Update any deprecated Neo4j function names in the query."""
+        replacements = {
+            "gds.alpha.similarity.cosine": "gds.similarity.cosine",
+            "gds.alpha.pageRank": "gds.pageRank",
+        }
+
+        for old, new in replacements.items():
+            query = query.replace(old, new)
+
+        return query
+
+    def _execute_query(
+        self, cypher_query: str, parameters: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Execute a Cypher query against Neo4j.
+        """
+        with get_neo4j_driver() as driver:
+            with driver.session() as session:
+                result = session.run(cypher_query, parameters=parameters)
+                return [record.data() for record in result]
 
 schema_hint = """
-Neo4j Schema:
-Node labels: Project, Chunk, Donation
-Relationships: Project -> Chunk (:HAS_CHUNK), Project -> Donation (:HAS_DONATION)
-Project properties: id, title, raised_amount, giv_power, given_power_rank, givbacks_eligible, in_active_qf_round, unique_donors, owner_wallet, ethereum_address, polygon_address, optimism_address, celo_address, base_address, arbitrum_address, gnosis_address, zkevm_address, ethereum_classic_address, stellar_address, solana_address, x, facebook, instagram, youtube, linkedin, reddit, discord, farcaster, lens, website, telegram, github, listed
-Chunk properties: id, text, embedding, created_at
-Donation properties: id, tx_hash, chain_id, project_title, created_at, amount, value_usd
-Chunks are generated by splitting the description of a project.
-"""
-user_request = {
-    "query": "I want to hear about projects impact kids health",
-    "output_format": "{project_id, project_title, raised_amount, giv_power, giv_power_rank, givbacks_eligible, in_active_qf_round, unique_donors, owner_wallet, ethereum_address, polygon_address, optimism_address, celo_address, base_address, arbitrum_address, gnosis_address, zkevm_address, ethereum_classic_address, stellar_address, solana_address, x, facebook, instagram, youtube, linkedin, reddit, discord, farcaster, lens, website, telegram, github, related_chunks: [text] (array)}",
-}
-# user_request = {
-#     "query": "5 random donations with value more than 100$",
-#     "output_format": "{tx_hash, chain_id, project_title(project.title), created_at, amount, value_usd}",
-# }
-results = process_user_request(schema_hint=schema_hint, request=user_request)
-print("#######################")
+    Neo4j Schema:
+    Node labels: Project, Chunk, Donation
+    Relationships: Project -> Chunk (:HAS_CHUNK), Project -> Donation (:HAS_DONATION)
+    Project properties: id, title, raised_amount, giv_power, given_power_rank, 
+    givbacks_eligible, in_active_qf_round, unique_donors, owner_wallet, 
+    ethereum_address, polygon_address, optimism_address, celo_address, base_address, 
+    arbitrum_address, gnosis_address, zkevm_address, ethereum_classic_address, 
+    stellar_address, solana_address, x, facebook, instagram, youtube, linkedin, 
+    reddit, discord, farcaster, lens, website, telegram, github, listed
+    Chunk properties: id, text, embedding, created_at
+    Donation properties: id, tx_hash, chain_id, project_title, created_at, 
+    amount, value_usd
+    Chunks are generated by splitting the description of a project.
+    """
 
-print(json.dumps(results, indent=4))
+# Example Usage
+if __name__ == "__main__":
+    processor = CypherQueryProcessor(schema_hint)
 
-# from langchain_neo4j import GraphCypherQAChain, Neo4jGraph
-# from langchain_openai import ChatOpenAI
-# # from langchain_community.embeddings import OpenAIEmbeddings
-# from config import OPENAI_API_KEY, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+    user_request: Dict[str, Any] = {
+        "query": "I want to hear about projects impacting kids' health",
+        "output_format": """{
+            project_id, project_title, raised_amount, giv_power, 
+            giv_power_rank, givbacks_eligible, in_active_qf_round, 
+            unique_donors, owner_wallet, ethereum_address, polygon_address,  
+            optimism_address, celo_address, base_address, arbitrum_address, 
+            gnosis_address, zkevm_address, ethereum_classic_address, 
+            stellar_address, solana_address, x, facebook, instagram, youtube, 
+            linkedin, reddit, discord, farcaster, lens, website, telegram, 
+            github, related_chunks: [text] (array)
+        }""",
+    }
 
-
-# graph = Neo4jGraph(url=NEO4J_URI, username=NEO4J_USER, password=NEO4J_PASSWORD)
-
-# graph.refresh_schema()
-
-# print("##################################################")
-# print(f"Graph Schema: {graph.schema}")
-# print("##################################################")
-# chain = GraphCypherQAChain.from_llm(
-#     ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY),
-#     graph=graph,
-#     verbose=True,
-#     allow_dangerous_requests=True,
-#     return_intermediate_steps=True,
-# )
-
-
-# result = chain.invoke({
-#     "query": "I want to hear about projecs impact kids health",
-# })
-# print(result)
+    results: List[Dict[str, Any]] = processor.process_user_request(user_request)
+    print(json.dumps(results, indent=4))

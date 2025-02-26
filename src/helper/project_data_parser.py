@@ -1,4 +1,4 @@
-from html_cleaner import clean_html
+from helper.html_cleaner import clean_html
 from datetime import datetime
 
 EVM_NETWORKS_MAP = {

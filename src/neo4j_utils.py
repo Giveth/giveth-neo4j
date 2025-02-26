@@ -1,6 +1,6 @@
-from database import get_all_chunks, get_all_projects, get_all_donations
+from database import ChunkManager, ProjectManager, DonationManager
 from neo4j import GraphDatabase
-from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+from config.config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
 
 def get_neo4j_driver():
@@ -14,7 +14,7 @@ def insert_projects_to_neo4j():
     """
     Insert all projects from SQLite into Neo4j.
     """
-    projects = get_all_projects()
+    projects = ProjectManager.get_all_projects()
 
     query = """
     UNWIND $data AS row
@@ -96,7 +96,7 @@ def insert_chunks_to_neo4j():
     """
     Insert all chunks from SQLite into Neo4j and link them to projects.
     """
-    chunks = get_all_chunks()
+    chunks = ChunkManager.get_all_chunks()
 
     query = """
     UNWIND $data AS row
@@ -118,7 +118,7 @@ def insert_donations_to_neo4j():
     """
     Insert all donations from SQLite into Neo4j.
     """
-    donations = get_all_donations()
+    donations = DonationManager.get_all_donations()
 
     query = """
     UNWIND $data AS row
