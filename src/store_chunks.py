@@ -1,6 +1,6 @@
 import sqlite3
 from database import get_projects
-from chunking import chunk_text
+from helper.chunking import chunk_text
 from database import DB_PATH
 
 def store_chunks():

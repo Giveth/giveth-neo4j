@@ -7,7 +7,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 base_dir = os.path.dirname(os.path.abspath(__file__))
 db_path = os.path.join(base_dir, '..', 'data', 'local_data.db')
 
-from src.cypher_query import process_user_request, schema_hint
+from src.cypher_query import CypherQueryProcessor, schema_hint
 
 app = Flask(__name__)
 
@@ -51,7 +51,8 @@ def query():
     }
 
     try:
-        results = process_user_request(schema_hint=schema_hint, request=user_request)
+        query_processor = CypherQueryProcessor(schema_hint)
+        results = query_processor.process_user_request(user_request)
         return jsonify(results)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
