@@ -9,9 +9,9 @@ class Neo4jImporter:
     """
 
     def __init__(self):
-        self.driver = self._get_driver()
+        self.driver = self.get_driver()
 
-    def _get_driver(self):
+    def get_driver(self):
         """Get a Neo4j driver instance."""
         return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
@@ -27,7 +27,9 @@ class Neo4jImporter:
 
     def import_projects(self):
         """Import all projects from SQLite into Neo4j."""
-        projects = ProjectManager.get_all_projects()
+        projectManager = ProjectManager()
+
+        projects = projectManager.get_all_projects()
 
         query = """
         UNWIND $data AS row
@@ -105,7 +107,9 @@ class Neo4jImporter:
 
     def import_chunks(self):
         """Import all chunks from SQLite into Neo4j and link them to projects."""
-        chunks = ChunkManager.get_all_chunks()
+        chunkManager = ChunkManager()
+
+        chunks = chunkManager.get_all_chunks()
 
         query = """
         UNWIND $data AS row
@@ -123,7 +127,9 @@ class Neo4jImporter:
 
     def import_donations(self):
         """Import all donations from SQLite into Neo4j."""
-        donations = DonationManager.get_all_donations()
+        donationManager = DonationManager()
+
+        donations = donationManager.get_all_donations()
 
         query = """
         UNWIND $data AS row
@@ -148,6 +154,7 @@ class Neo4jImporter:
 
         with self.driver.session() as session:
             session.run(query, data=donations)
+
 
 def main():
     importer = Neo4jImporter()
