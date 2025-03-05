@@ -84,22 +84,27 @@ class CypherQueryProcessor:
         Note: Only include "embedding_message" if "embedding_needed" is True.
         """
 
-        response = openai_client.completions.create(
-            model="gpt-3.5-turbo-instruct",
-            prompt=prompt,
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt},
+            ],
             max_tokens=100,
             temperature=0.3,
         )
 
-        result: str = response.choices[0].text.strip()
+        result: str = response.choices[0].message.content.strip()
 
         # Ensure proper JSON formatting
-        result = re.sub(r'("embedding_needed": )false', r"\1False", result)
-        result = re.sub(r'("embedding_needed": )true', r"\1True", result)
+        result_clean = (
+            result.strip("`").replace("json", "").replace("```", "").strip()
+        )
+        print(f"Cleaned result: {result_clean}")
 
-        print(f"Embedding Check Result: {result}")
+        embedding_info = json.loads(result_clean)
 
-        return eval(result)
+        return embedding_info
 
     def _generate_cypher_query(
         self,
@@ -179,14 +184,17 @@ class CypherQueryProcessor:
 
         print(f"Generated Prompt: {prompt}")
 
-        response = openai_client.completions.create(
-            model="gpt-3.5-turbo-instruct",
-            prompt=prompt,
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are an expert Cypher query generator."},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=500,
             temperature=0.1,
         )
 
-        cypher_query: str = response.choices[0].text.strip()
+        cypher_query: str = response.choices[0].message.content.strip()
 
         # Remove any backticks or code block markers
         cypher_query = re.sub(r"^```cypher\s*", "", cypher_query)
