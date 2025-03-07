@@ -1,4 +1,4 @@
-from neo4j_utils import get_neo4j_driver
+from neo4j_utils import Neo4jImporter
 from utils.openai import generate_embedding
 
 
@@ -12,8 +12,8 @@ from utils.openai import generate_embedding
 #     ORDER BY similarity DESC
 #     RETURN c.text AS chunk, similarity LIMIT $top_n
 #     """
-
-#     with get_neo4j_driver() as driver:
+#     importer = Neo4jImporter()
+#     with importer.get_driver() as driver:
 #         with driver.session() as session:
 #             result = session.run(query, queryVector=query_embedding, top_n=top_n)
 #             return result.data()
@@ -112,7 +112,9 @@ def search_projects_with_chunks(query_text, similarity_threshold=0.7):
     """
 
     # Execute the query
-    with get_neo4j_driver() as driver:
+    importer = Neo4jImporter()
+    
+    with importer.get_driver() as driver:
         with driver.session() as session:
             result = session.run(
                 query,
