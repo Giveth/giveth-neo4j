@@ -97,9 +97,7 @@ class CypherQueryProcessor:
         result: str = response.choices[0].message.content.strip()
 
         # Ensure proper JSON formatting
-        result_clean = (
-            result.strip("`").replace("json", "").replace("```", "").strip()
-        )
+        result_clean = result.strip("`").replace("json", "").replace("```", "").strip()
         print(f"Cleaned result: {result_clean}")
 
         embedding_info = json.loads(result_clean)
@@ -187,8 +185,11 @@ class CypherQueryProcessor:
         response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are an expert Cypher query generator."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You are an expert Cypher query generator.",
+                },
+                {"role": "user", "content": prompt},
             ],
             max_tokens=500,
             temperature=0.1,
