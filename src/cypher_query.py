@@ -97,7 +97,14 @@ class CypherQueryProcessor:
         result: str = response.choices[0].message.content.strip()
 
         # Ensure proper JSON formatting
-        result_clean = result.strip("`").replace("json", "").replace("```", "").strip()
+        result_clean = (
+            result.strip("`")
+            .replace("json", "")
+            .replace("```", "")
+            .strip()
+            .replace("True", "true")
+            .replace("False", "false")
+        )
         print(f"Cleaned result: {result_clean}")
 
         embedding_info = json.loads(result_clean)
